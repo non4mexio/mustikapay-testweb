@@ -1,6 +1,6 @@
 {
   "name": "MustikaPay Integration Tester",
-  "description": "Aplikasi testing integrasi payment gateway MustikaPay untuk create QRIS, check status transaksi, dan webhook receiver dengan verifikasi signature HMAC.",
+  "description": "Aplikasi testing integrasi multi-payment MustikaPay (QRIS, E-Wallet, Virtual Account, Retail) dengan SQLite storage dan webhook receiver HMAC oleh NoxlyDev (https://www.noxlydev.xyz).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

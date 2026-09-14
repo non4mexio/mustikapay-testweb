@@ -59,22 +59,41 @@ export const Header: React.FC<HeaderProps> = ({
               M
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-slate-900 text-base tracking-tight">
-                  MustikaPay Tester
+                  MustikaPay Suite
                 </span>
                 <span className="text-[11px] font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 font-mono">
-                  mustikapay-node v1.4.1
+                  mustikapay-node
                 </span>
+                <a
+                  href="https://www.noxlydev.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200 hover:bg-indigo-100 inline-flex items-center gap-1 transition-colors"
+                  title="Visit NoxlyDev"
+                >
+                  <span>by NoxlyDev</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
               </div>
-              <p className="text-xs text-slate-500 hidden sm:block">
-                Powered by official Node.js SDK (QRIS, Cek Status & Webhook HMAC)
+              <p className="text-xs text-slate-500 hidden sm:flex items-center gap-2 mt-0.5">
+                <span>Multi-Payment Gateway (QRIS, E-Wallet, VA, Retail)</span>
+                <span>•</span>
+                <span className="text-emerald-700 font-medium">SQLite Engine</span>
               </p>
             </div>
           </div>
 
           {/* API Key Status Pill & Actions */}
           <div className="flex items-center gap-2">
+            {config?.database && (
+              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-slate-100 text-slate-700 border border-slate-200 font-mono">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>SQLite: {config.database.totalTransactions} tx</span>
+              </div>
+            )}
+
             <button
               id="api-key-status-btn"
               onClick={() => setShowKeyModal(true)}
@@ -99,12 +118,12 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <a
-              href="https://mustikapayment.com"
+              href="https://www.noxlydev.xyz"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-slate-500 hover:text-slate-800 hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
             >
-              <span>MustikaPay</span>
+              <span>NoxlyDev</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
@@ -121,7 +140,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            1. Buat QRIS
+            1. Multi-Payment (QRIS/E-Wallet/VA/Retail)
           </button>
           <button
             id="tab-status-btn"
@@ -137,13 +156,20 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="tab-transactions-btn"
             onClick={() => setActiveTab('transactions')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 ${
               activeTab === 'transactions'
                 ? 'bg-slate-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            3. Daftar Transaksi
+            <span>3. Transaksi SQLite</span>
+            {config?.database && config.database.totalTransactions > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                activeTab === 'transactions' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {config.database.totalTransactions}
+              </span>
+            )}
           </button>
           <button
             id="tab-webhook-btn"
@@ -154,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            4. Webhook & curl
+            4. Webhook Simulator & curl
           </button>
           <button
             id="tab-docs-btn"
@@ -165,7 +191,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            5. Panduan & Notes
+            5. Panduan & SDK
           </button>
         </nav>
       </div>

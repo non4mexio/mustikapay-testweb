@@ -117,15 +117,60 @@ const mp = new MustikaPay({ apiKey: process.env.MUSTIKAPAY_API_KEY });
 
 // 3. Buat QRIS
 const qris = await mp.createQris(10000);
-console.log(qris.qr_url, qris.ref_no);
+// 3. Create QRIS
+const qris = await mp.createQris({ amount: 25000, productName: 'Order #123' });
 
-// 4. Cek Status Transaksi
-const status = await mp.checkQrisStatus(qris.ref_no);
-console.log(status.data.status);
+// 4. Create E-Wallet (DANA, OVO, GOPAY, SHOPEEPAY, LINKAJA)
+const ewallet = await mp.createEwallet({
+  amount: 25000,
+  productCode: 'DANA',
+  phone: '08123456789',
+  name: 'Budi Tester',
+});
 
-// 5. Verifikasi Webhook Callback
+// 5. Create Virtual Account (BCA, BRI, BNI, MANDIRI, PERMATA, CIMB, BSI)
+const va = await mp.createVa({
+  amount: 50000,
+  bankCode: 'BCA',
+  name: 'Budi Tester',
+  phone: '08123456789',
+});
+
+// 6. Create Retail (ALFAMART / INDOMARET)
+const retail = await mp.createRetail({
+  amount: 50000,
+  retailOutlet: 'ALFAMART',
+  name: 'Budi Tester',
+});
+
+// 7. Check Status (Semua Metode)
+const statusQris = await mp.checkQrisStatus('QR123...');
+const statusEwallet = await mp.checkEwalletStatus('EW123...');
+const statusVa = await mp.checkVaStatus('VA123...');
+const statusRetail = await mp.checkRetailStatus('RT123...');
+
+// 8. Verifikasi Webhook Callback
 const isValid = mp.verifyCallback(rawBodyString, signatureHeader);`}
         </pre>
+      </div>
+
+      {/* NoxlyDev Attribution Card */}
+      <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-2xl p-6 border border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="space-y-1 text-center sm:text-left">
+          <span className="font-bold text-base block">Dikembangkan oleh NoxlyDev</span>
+          <p className="text-xs text-indigo-200">
+            Solusi integrasi payment gateway dan arsitektur web modern dengan SQLite database persistence.
+          </p>
+        </div>
+        <a
+          href="https://www.noxlydev.xyz"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 transition-colors shrink-0"
+        >
+          <span>Kunjungi noxlydev.xyz</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
       </div>
 
       {/* Code Snippet for Next.js App Router (if user copies to Next.js) */}

@@ -7,12 +7,21 @@ import {
   verifyMustikaPaySignature,
   generateMustikaPaySignature,
   normalizeStatus,
-  TransactionRecord,
-  WebhookLogItem,
   MustikaPayCreateResponse,
   MustikaPayCheckResponse,
   MustikaPayWebhookPayload,
 } from './src/lib/mustikapay';
+import {
+  saveTransaction,
+  updateTransaction,
+  getTransaction,
+  getAllTransactions,
+  clearAllTransactions,
+  saveWebhookLog,
+  getAllWebhookLogs,
+  getDatabaseStats,
+} from './src/lib/sqlite';
+import { TransactionRecord, WebhookLogItem } from './src/types';
 
 // Load environment variables (.env, .env.local)
 dotenv.config();
@@ -20,12 +29,6 @@ dotenv.config({ path: '.env.local' });
 
 const PORT = 3000;
 const MUSTIKAPAY_BASE_URL = 'https://mustikapayment.com';
-
-// In-memory store for testing transactions
-const transactionsStore = new Map<string, TransactionRecord>();
-
-// In-memory store for recent webhook event logs (up to 50 items)
-const webhookLogs: WebhookLogItem[] = [];
 
 // Optional runtime API key override for UI convenience during testing
 let runtimeApiKeyOverride: string | null = null;
@@ -104,7 +107,7 @@ async function startServer() {
       const rawStatus = parsedPayload?.data?.status || parsedPayload?.status || 'UNKNOWN';
       const cleanStatus = normalizeStatus(rawStatus);
 
-      // Log to in-memory log list for easy UI inspection
+      // Log to SQLite database
       const logEntry: WebhookLogItem = {
         id: `wh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         timestamp: new Date().toISOString(),
@@ -116,10 +119,7 @@ async function startServer() {
         status: cleanStatus,
         ip: req.ip || req.socket.remoteAddress || 'unknown',
       };
-      webhookLogs.unshift(logEntry);
-      if (webhookLogs.length > 50) {
-        webhookLogs.pop();
-      }
+      saveWebhookLog(logEntry);
 
       // Reject if signature invalid
       if (!isSignatureValid) {
@@ -134,30 +134,33 @@ async function startServer() {
       console.log('[MustikaPay Webhook] Signature verification SUCCESSFUL!');
       console.log('Parsed Webhook Payload:', JSON.stringify(parsedPayload, null, 2));
 
-      // Update transaction in memory store if refNo is recognized
+      // Update transaction in SQLite if refNo is recognized
       if (refNo) {
-        const existing = transactionsStore.get(refNo);
+        const existing = getTransaction(refNo);
         const receiptUrl =
           parsedPayload?.data?.receipt_url ||
           (parsedPayload as any)?.receipt_url ||
           existing?.receipt_url;
 
+        const serviceType = (parsedPayload?.service || parsedPayload?.data?.type || existing?.method || 'qris').toLowerCase();
+
         if (existing) {
-          existing.status = cleanStatus;
-          existing.updatedAt = new Date().toISOString();
-          existing.lastWebhookPayload = parsedPayload;
-          if (receiptUrl) existing.receipt_url = receiptUrl;
-          if (parsedPayload?.data?.issuer) existing.issuer = parsedPayload.data.issuer;
-          if (parsedPayload?.data?.payor) existing.payor = parsedPayload.data.payor;
-          if (parsedPayload?.data?.net_amount) existing.net_amount = parsedPayload.data.net_amount;
-          transactionsStore.set(refNo, existing);
-          console.log(`[MustikaPay Webhook] Updated transaction ${refNo} status to: ${cleanStatus}`);
+          updateTransaction(refNo, {
+            status: cleanStatus,
+            lastWebhookPayload: parsedPayload,
+            receipt_url: receiptUrl || existing.receipt_url,
+            issuer: parsedPayload?.data?.issuer || existing.issuer,
+            payor: parsedPayload?.data?.payor || existing.payor,
+            net_amount: parsedPayload?.data?.net_amount ?? existing.net_amount,
+          });
+          console.log(`[MustikaPay Webhook] Updated transaction ${refNo} status to: ${cleanStatus} in SQLite`);
         } else {
-          // If transaction wasn't in memory yet, create record from webhook
+          // If transaction wasn't in DB yet, create record from webhook
           const newRecord: TransactionRecord = {
             ref_no: refNo,
+            method: serviceType.includes('va') ? 'va' : serviceType.includes('retail') ? 'retail' : serviceType.includes('emoney') || serviceType.includes('ewallet') ? 'ewallet' : 'qris',
             amount: Number(parsedPayload?.data?.amount || parsedPayload?.amount || 0),
-            product_name: 'Pembayaran QRIS',
+            product_name: `Pembayaran ${parsedPayload?.service || 'MustikaPay'}`,
             customer_name: parsedPayload?.data?.payor || 'Customer',
             status: cleanStatus,
             receipt_url: receiptUrl,
@@ -168,8 +171,8 @@ async function startServer() {
             updatedAt: new Date().toISOString(),
             lastWebhookPayload: parsedPayload,
           };
-          transactionsStore.set(refNo, newRecord);
-          console.log(`[MustikaPay Webhook] Created new transaction ${refNo} from webhook callback`);
+          saveTransaction(newRecord);
+          console.log(`[MustikaPay Webhook] Created new transaction ${refNo} in SQLite from webhook callback`);
         }
       }
 
@@ -208,7 +211,17 @@ async function startServer() {
         version: '1.4.1',
         isOfficial: true,
       },
+      database: getDatabaseStats(),
     });
+  });
+
+  // Get SQLite Database statistics
+  app.get('/api/database/stats', (req: Request, res: Response): void => {
+    try {
+      res.json(getDatabaseStats());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Gagal membaca statistik database' });
+    }
   });
 
   // Ambil daftar bank via official SDK (mp.getBankList())
@@ -321,9 +334,10 @@ async function startServer() {
         return;
       }
 
-      // Store in memory
+      // Simpan transaksi QRIS ke database SQLite
       const transaction: TransactionRecord = {
         ref_no,
+        method: 'qris',
         amount: numAmount,
         product_name: String(product_name).trim(),
         customer_name: String(customer_name).trim(),
@@ -334,11 +348,12 @@ async function startServer() {
         updatedAt: new Date().toISOString(),
         rawCreateResponse: data,
       };
-      transactionsStore.set(ref_no, transaction);
+      saveTransaction(transaction);
 
       res.status(200).json({
         success: true,
         ref_no,
+        method: 'qris',
         qr_url,
         payment_link,
         amount: numAmount,
@@ -355,8 +370,322 @@ async function startServer() {
     }
   });
 
-  // 4. Check Status Route Handler
-  // GET /api/mustikapay/check-status?ref_no=...&type=qris
+  // 3b. Create E-Wallet Route Handler (DANA, OVO, GOPAY, SHOPEEPAY, LINKAJA)
+  // POST /api/mustikapay/create-ewallet
+  app.post('/api/mustikapay/create-ewallet', async (req: Request, res: Response): Promise<void> => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      res.status(500).json({
+        error: 'MUSTIKAPAY_API_KEY belum disetel',
+        message: 'Silakan atur MUSTIKAPAY_API_KEY di .env.local atau di panel konfigurasi atas.',
+      });
+      return;
+    }
+
+    const { amount, product_code = 'DANA', phone, customer_name = 'Pelanggan', product_name = 'Pembayaran E-Wallet' } = req.body;
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount < 1000) {
+      res.status(400).json({
+        error: 'Nominal tidak valid',
+        message: 'Nominal minimum untuk E-Wallet adalah Rp 1.000.',
+      });
+      return;
+    }
+
+    if (!phone || !String(phone).trim()) {
+      res.status(400).json({
+        error: 'Nomor HP diperlukan',
+        message: 'Nomor HP akun E-Wallet customer wajib diisi (misal: 08123456789).',
+      });
+      return;
+    }
+
+    try {
+      const mp = getMustikaPayClient();
+      if (!mp) {
+        throw new Error('Gagal menginisialisasi client MustikaPay SDK');
+      }
+
+      console.log(`\n[MustikaPay SDK] Calling createEwallet via mustikapay-node SDK:`, {
+        amount: Math.floor(numAmount),
+        productCode: product_code,
+        phone,
+        name: customer_name,
+        productName: product_name,
+      });
+
+      const data: any = await mp.createEwallet({
+        amount: Math.floor(numAmount),
+        productCode: String(product_code).toUpperCase().trim(),
+        phone: String(phone).trim(),
+        name: String(customer_name).trim(),
+        productName: String(product_name).trim(),
+      });
+
+      console.log(`[MustikaPay SDK createEwallet Response]:`, data);
+
+      const ref_no = data?.data?.ref_no || data?.ref_no || data?.data?.reference || data?.reference;
+      const checkout_url = data?.data?.checkout_url || data?.checkout_url || data?.data?.payment_link || data?.payment_link;
+      const qr_url = data?.data?.qr_url || data?.qr_url;
+
+      if (data?.status && data.status !== 'success' && data.status !== true) {
+        res.status(400).json({
+          error: data.message || 'Gagal membuat tagihan E-Wallet di MustikaPay',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      if (!ref_no) {
+        res.status(502).json({
+          error: 'Respons MustikaPay tidak menyertakan ref_no',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      // Simpan ke SQLite
+      const transaction: TransactionRecord = {
+        ref_no,
+        method: 'ewallet',
+        channel: String(product_code).toUpperCase(),
+        amount: numAmount,
+        product_name: String(product_name).trim(),
+        customer_name: String(customer_name).trim(),
+        customer_phone: String(phone).trim(),
+        status: 'pending',
+        checkout_url,
+        payment_link: checkout_url,
+        qr_url,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawCreateResponse: data,
+      };
+      saveTransaction(transaction);
+
+      res.status(200).json({
+        success: true,
+        ref_no,
+        method: 'ewallet',
+        channel: String(product_code).toUpperCase(),
+        checkout_url,
+        payment_link: checkout_url,
+        qr_url,
+        amount: numAmount,
+        customer_name,
+        customer_phone: phone,
+        rawResponse: data,
+      });
+    } catch (error: any) {
+      console.error('[MustikaPay Error] create-ewallet failed:', error);
+      res.status(500).json({
+        error: 'Gagal menghubungi server MustikaPay',
+        details: error?.message || String(error),
+      });
+    }
+  });
+
+  // 3c. Create Virtual Account (VA) Route Handler
+  // POST /api/mustikapay/create-va
+  app.post('/api/mustikapay/create-va', async (req: Request, res: Response): Promise<void> => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      res.status(500).json({
+        error: 'MUSTIKAPAY_API_KEY belum disetel',
+        message: 'Silakan atur MUSTIKAPAY_API_KEY di .env.local atau di panel konfigurasi atas.',
+      });
+      return;
+    }
+
+    const { amount, bank_code = 'BCA', customer_name = 'Pelanggan VA', phone = '08123456789', product_name = 'Pembayaran VA' } = req.body;
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount < 10000) {
+      res.status(400).json({
+        error: 'Nominal tidak valid',
+        message: 'Nominal minimum untuk Virtual Account biasanya Rp 10.000.',
+      });
+      return;
+    }
+
+    try {
+      const mp = getMustikaPayClient();
+      if (!mp) {
+        throw new Error('Gagal menginisialisasi client MustikaPay SDK');
+      }
+
+      console.log(`\n[MustikaPay SDK] Calling createVa via mustikapay-node SDK:`, {
+        amount: Math.floor(numAmount),
+        bankCode: bank_code,
+        name: customer_name,
+        phone,
+      });
+
+      const data: any = await mp.createVa({
+        amount: Math.floor(numAmount),
+        bankCode: String(bank_code).toUpperCase().trim(),
+        name: String(customer_name).trim(),
+        phone: String(phone).trim(),
+      });
+
+      console.log(`[MustikaPay SDK createVa Response]:`, data);
+
+      const ref_no = data?.data?.ref_no || data?.ref_no || data?.data?.reference || data?.reference;
+      const va_number = data?.data?.va_number || data?.va_number || data?.data?.account_number || data?.account_number;
+
+      if (data?.status && data.status !== 'success' && data.status !== true) {
+        res.status(400).json({
+          error: data.message || 'Gagal membuat Virtual Account di MustikaPay',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      if (!ref_no) {
+        res.status(502).json({
+          error: 'Respons MustikaPay tidak menyertakan ref_no',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      // Simpan ke SQLite
+      const transaction: TransactionRecord = {
+        ref_no,
+        method: 'va',
+        channel: String(bank_code).toUpperCase(),
+        amount: numAmount,
+        product_name: String(product_name).trim(),
+        customer_name: String(customer_name).trim(),
+        customer_phone: String(phone).trim(),
+        status: 'pending',
+        va_number,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawCreateResponse: data,
+      };
+      saveTransaction(transaction);
+
+      res.status(200).json({
+        success: true,
+        ref_no,
+        method: 'va',
+        channel: String(bank_code).toUpperCase(),
+        va_number,
+        amount: numAmount,
+        customer_name,
+        rawResponse: data,
+      });
+    } catch (error: any) {
+      console.error('[MustikaPay Error] create-va failed:', error);
+      res.status(500).json({
+        error: 'Gagal menghubungi server MustikaPay',
+        details: error?.message || String(error),
+      });
+    }
+  });
+
+  // 3d. Create Retail (Alfamart / Indomaret)
+  // POST /api/mustikapay/create-retail
+  app.post('/api/mustikapay/create-retail', async (req: Request, res: Response): Promise<void> => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      res.status(500).json({
+        error: 'MUSTIKAPAY_API_KEY belum disetel',
+        message: 'Silakan atur MUSTIKAPAY_API_KEY di .env.local atau di panel konfigurasi atas.',
+      });
+      return;
+    }
+
+    const { amount, retail_outlet = 'ALFAMART', customer_name = 'Customer Retail', product_name = 'Pembayaran Retail' } = req.body;
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount < 10000) {
+      res.status(400).json({
+        error: 'Nominal tidak valid',
+        message: 'Nominal minimum untuk Gerai Retail adalah Rp 10.000.',
+      });
+      return;
+    }
+
+    try {
+      const mp = getMustikaPayClient();
+      if (!mp) {
+        throw new Error('Gagal menginisialisasi client MustikaPay SDK');
+      }
+
+      console.log(`\n[MustikaPay SDK] Calling createRetail via mustikapay-node SDK:`, {
+        amount: Math.floor(numAmount),
+        retailOutlet: retail_outlet,
+        name: customer_name,
+        productName: product_name,
+      });
+
+      const outlet = String(retail_outlet).toUpperCase().trim() === 'INDOMARET' ? 'INDOMARET' : 'ALFAMART';
+
+      const data: any = await mp.createRetail({
+        amount: Math.floor(numAmount),
+        retailOutlet: outlet,
+        name: String(customer_name).trim(),
+        productName: String(product_name).trim(),
+      });
+
+      console.log(`[MustikaPay SDK createRetail Response]:`, data);
+
+      const ref_no = data?.data?.ref_no || data?.ref_no || data?.data?.reference || data?.reference;
+      const retail_code = data?.data?.payment_code || data?.data?.retail_code || data?.payment_code || data?.retail_code;
+
+      if (data?.status && data.status !== 'success' && data.status !== true) {
+        res.status(400).json({
+          error: data.message || 'Gagal membuat kode Retail di MustikaPay',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      if (!ref_no) {
+        res.status(502).json({
+          error: 'Respons MustikaPay tidak menyertakan ref_no',
+          rawResponse: data,
+        });
+        return;
+      }
+
+      // Simpan ke SQLite
+      const transaction: TransactionRecord = {
+        ref_no,
+        method: 'retail',
+        channel: String(retail_outlet).toUpperCase(),
+        amount: numAmount,
+        product_name: String(product_name).trim(),
+        customer_name: String(customer_name).trim(),
+        status: 'pending',
+        retail_code,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawCreateResponse: data,
+      };
+      saveTransaction(transaction);
+
+      res.status(200).json({
+        success: true,
+        ref_no,
+        method: 'retail',
+        channel: String(retail_outlet).toUpperCase(),
+        retail_code,
+        amount: numAmount,
+        customer_name,
+        rawResponse: data,
+      });
+    } catch (error: any) {
+      console.error('[MustikaPay Error] create-retail failed:', error);
+      res.status(500).json({
+        error: 'Gagal menghubungi server MustikaPay',
+        details: error?.message || String(error),
+      });
+    }
+  });
+
+  // 4. Universal Check Status Route Handler (QRIS, E-Wallet, VA, Retail)
+  // GET /api/mustikapay/check-status?ref_no=...&method=qris
   app.get('/api/mustikapay/check-status', async (req: Request, res: Response): Promise<void> => {
     const apiKey = getApiKey();
     if (!apiKey) {
@@ -373,35 +702,49 @@ async function startServer() {
       return;
     }
 
+    const existing = getTransaction(ref_no);
+    const method = String(req.query.method || existing?.method || 'qris').toLowerCase();
+
     try {
       const mp = getMustikaPayClient();
       if (!mp) {
         throw new Error('Gagal menginisialisasi client MustikaPay SDK');
       }
 
-      console.log(`\n[MustikaPay SDK] Calling checkQrisStatus via mustikapay-node SDK for ref_no: ${ref_no}`);
-      const data: any = await mp.checkQrisStatus(ref_no);
-      console.log(`[MustikaPay SDK checkQrisStatus Response]:`, data);
+      console.log(`\n[MustikaPay SDK] Calling checkStatus for ref_no: ${ref_no} (method: ${method})`);
 
-      // Defensive status parsing
+      let data: any;
+      if (method === 'ewallet' || method === 'emoney') {
+        data = await mp.checkEwalletStatus(ref_no);
+      } else if (method === 'va') {
+        data = await mp.checkVaStatus(ref_no);
+      } else if (method === 'retail') {
+        data = await mp.checkRetailStatus(ref_no);
+      } else {
+        data = await mp.checkQrisStatus(ref_no);
+      }
+
+      console.log(`[MustikaPay SDK checkStatus Response]:`, data);
+
       const rawStatus = data?.data?.status || data?.status || 'pending';
       const cleanStatus = normalizeStatus(rawStatus);
       const receipt_url = data?.data?.receipt_url || data?.receipt_url;
 
-      // Update in memory store if exists
-      const existing = transactionsStore.get(ref_no);
+      // Update di SQLite
       if (existing) {
-        existing.status = cleanStatus;
-        if (receipt_url) existing.receipt_url = receipt_url;
-        if (data?.data?.issuer) existing.issuer = data.data.issuer;
-        if (data?.data?.payor) existing.payor = data.data.payor;
-        existing.updatedAt = new Date().toISOString();
-        existing.rawCheckResponse = data;
-        transactionsStore.set(ref_no, existing);
+        updateTransaction(ref_no, {
+          status: cleanStatus,
+          receipt_url: receipt_url || existing.receipt_url,
+          issuer: data?.data?.issuer || existing.issuer,
+          payor: data?.data?.payor || existing.payor,
+          net_amount: data?.data?.net_amount ?? existing.net_amount,
+          rawCheckResponse: data,
+        });
       }
 
       res.status(200).json({
         ref_no,
+        method,
         status: cleanStatus,
         rawStatus,
         receipt_url,
@@ -418,35 +761,36 @@ async function startServer() {
     }
   });
 
-  // 5. Get all transactions (for list view)
+  // 5. Get all transactions from SQLite
   // GET /api/transactions
   app.get('/api/transactions', (req: Request, res: Response): void => {
-    const list = Array.from(transactionsStore.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    const list = getAllTransactions(100);
     res.json({
       total: list.length,
+      storage: 'SQLite (Node.js DatabaseSync)',
       transactions: list,
     });
   });
 
-  // GET /api/transactions/:ref_no
+  // GET /api/transactions/:ref_no from SQLite
   app.get('/api/transactions/:ref_no', (req: Request, res: Response): void => {
     const ref_no = req.params.ref_no;
-    const tx = transactionsStore.get(ref_no);
+    const tx = getTransaction(ref_no);
     if (!tx) {
-      res.status(404).json({ error: 'Transaksi tidak ditemukan dalam memori' });
+      res.status(404).json({ error: 'Transaksi tidak ditemukan di database SQLite' });
       return;
     }
     res.json(tx);
   });
 
-  // 6. Get webhook logs (for inspect view)
+  // 6. Get webhook logs from SQLite
   // GET /api/webhook/logs
   app.get('/api/webhook/logs', (req: Request, res: Response): void => {
+    const logs = getAllWebhookLogs(50);
     res.json({
-      total: webhookLogs.length,
-      logs: webhookLogs,
+      total: logs.length,
+      storage: 'SQLite (Node.js DatabaseSync)',
+      logs,
     });
   });
 
@@ -504,11 +848,10 @@ async function startServer() {
     });
   });
 
-  // 8. Clear transactions & logs (convenient during testing)
+  // 8. Clear transactions & logs in SQLite
   app.post('/api/reset-data', (req: Request, res: Response): void => {
-    transactionsStore.clear();
-    webhookLogs.length = 0;
-    res.json({ success: true, message: 'Data transaksi & log webhook berhasil direset' });
+    clearAllTransactions();
+    res.json({ success: true, message: 'Data transaksi & log webhook di SQLite berhasil direset' });
   });
 
   // 9. Vite middleware for frontend SPA in development, or static dist in production

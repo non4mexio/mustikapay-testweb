@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ExternalLink, Database, Heart } from 'lucide-react';
 import { Header } from './components/Header';
 import { CreateQrisView } from './components/CreateQrisView';
 import { CheckStatusView } from './components/CheckStatusView';
@@ -167,15 +168,48 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 py-5 bg-white text-xs text-slate-500">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-          <div>
-            <span className="font-semibold text-slate-700">MustikaPay Integration Tester</span> — Server Route Handlers & HMAC Webhook Receiver
+      <footer className="border-t border-slate-200 py-6 bg-white text-xs text-slate-500">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+          <div className="space-y-1">
+            <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+              <span className="font-semibold text-slate-800">MustikaPay Multi-Payment Suite</span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono text-[11px]">
+                <Database className="w-3 h-3" />
+                <span>SQLite Persistence</span>
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px]">
+              Server-side route handlers, SQLite WAL database, and HMAC-SHA256 verified webhook receiver.
+            </p>
           </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Base: https://mustikapayment.com</span>
-            <span>•</span>
-            <span>QRIS Classic v1</span>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-6">
+            <div className="flex items-center gap-1 text-slate-600 font-medium">
+              <span>Crafted with</span>
+              <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+              <span>by</span>
+              <a
+                href="https://www.noxlydev.xyz"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-1 transition-colors"
+              >
+                <span>NoxlyDev</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="text-slate-400 text-[11px] font-mono">
+              <a
+                href="https://www.noxlydev.xyz"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-indigo-600 transition-colors"
+              >
+                https://www.noxlydev.xyz
+              </a>
+            </div>
           </div>
         </div>
       </footer>
